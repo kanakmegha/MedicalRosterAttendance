@@ -1,0 +1,38 @@
+# Gradle & Build caches
+.gradle/
+build/
+app/build/
+*.iml
+.idea/
+
+# Android Studio & OS metadata
+.DS_Store
+local.properties
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing & Security credentials (NEVER COMMIT)
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+secure-keys/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases and hospital data
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Uploaded roster files and generated exports
+*.xlsx
+*.pdf
+original_roster.png
