@@ -74,7 +74,6 @@ import com.example.rosterrebuild.ui.ExtractionViewModel
 import com.example.rosterrebuild.ui.RosterDashboardScreen
 import com.example.rosterrebuild.ui.RosterReviewScreen
 import com.example.rosterrebuild.ui.AppUpdateDialog
-import com.example.rosterrebuild.ui.UpdateEndpointDialog
 import com.example.rosterrebuild.ui.components.*
 import com.example.rosterrebuild.ui.theme.*
 import com.example.rosterrebuild.update.AppUpdateManager
@@ -91,6 +90,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         updateManager = AppUpdateManager(this, lifecycleScope)
+        com.example.rosterrebuild.update.AppUpdateCheckWorker.schedule(applicationContext)
         val initialImagePath = intent?.getStringExtra("image_path")
         val initialEmployeeId = intent?.getStringExtra("employee_id") ?: "ABHL341"
         if (!initialImagePath.isNullOrBlank()) {
@@ -113,10 +113,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::updateManager.isInitialized) {
-            val currentState = updateManager.uiState.value
-            if (currentState is UpdateUiState.PermissionRequired) {
-                updateManager.recheckInstallPermission(currentState.apkFile, currentState.manifest)
-            }
+            updateManager.onAppForegrounded()
         }
     }
 }
@@ -148,7 +145,6 @@ private fun RosterScreen(
     val currentScreen = state.currentScreen
 
     var showExportDialog by rememberSaveable { mutableStateOf(false) }
-    var showEndpointDialog by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         repository.recalculateAllRosterStatuses()
@@ -468,8 +464,7 @@ private fun RosterScreen(
                     viewModel.deleteRoster(roster)
                 },
                 storageManager = storageManager,
-                onCheckForUpdates = { updateManager.checkForUpdates(isManual = true) },
-                onConfigureEndpoint = { showEndpointDialog = true }
+                onCheckForUpdates = { updateManager.checkForUpdates(isManual = true) }
             )
         }
         ActiveScreen.DAILY_EDITOR -> {
@@ -782,17 +777,13 @@ private fun RosterScreen(
     }
 
     val updateState by updateManager.uiState.collectAsState()
-    AppUpdateDialog(
-        state = updateState,
-        updateManager = updateManager,
-        onLaunchIntent = { intent -> context.startActivity(intent) },
-        onConfigureEndpoint = { showEndpointDialog = true }
-    )
-
-    if (showEndpointDialog) {
-        UpdateEndpointDialog(
-            configStore = updateManager.configStore,
-            onDismiss = { showEndpointDialog = false }
+    val isEditingOrExtracting = (currentScreen == ActiveScreen.DAILY_EDITOR || state.status == ExtractionStatus.RUNNING)
+    // Only display dialog when not actively interrupting critical editing / OCR workflows
+    if (!isEditingOrExtracting || updateState !is UpdateUiState.Available) {
+        AppUpdateDialog(
+            state = updateState,
+            updateManager = updateManager,
+            onLaunchIntent = { intent -> context.startActivity(intent) }
         )
     }
 }

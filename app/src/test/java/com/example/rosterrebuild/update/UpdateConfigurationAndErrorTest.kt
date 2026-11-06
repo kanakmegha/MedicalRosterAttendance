@@ -89,19 +89,32 @@ class UpdateConfigurationAndErrorTest {
     }
 
     // =========================================================================
+    // 0. Production Endpoint Auto-Configuration
+    // =========================================================================
+    @Test
+    fun test0_productionEndpoint_isConfiguredByDefault() {
+        val configStore = UpdateConfigStore(dummyContext)
+        assertEquals(
+            "https://raw.githubusercontent.com/kanakmegha/MedicalRosterAttendance/main/release-manifest.json",
+            UpdateConfigStore.PRODUCTION_MANIFEST_URL
+        )
+        assertTrue(configStore.isConfigured())
+        assertEquals(UpdateConfigStore.PRODUCTION_MANIFEST_URL, configStore.getManifestUrl())
+    }
+
+    // =========================================================================
     // 1. Missing endpoint
     // =========================================================================
     @Test
     fun test1_missingEndpoint_returnsFriendlyNotConfiguredMessage() = runTest {
         val configStore = UpdateConfigStore(dummyContext)
-        configStore.clearManifestUrl() // ensure empty
-
         val fetcher = UpdateManifestFetcher(
             context = dummyContext,
             configStore = configStore
         )
 
-        val result = fetcher.checkForUpdates()
+        // Passing empty/blank endpoint
+        val result = fetcher.checkForUpdates(customUrl = "")
         assertTrue("Expected UpdateCheckResult.Error when endpoint is missing", result is UpdateCheckResult.Error)
 
         val error = result as UpdateCheckResult.Error
@@ -287,6 +300,37 @@ class UpdateConfigurationAndErrorTest {
         assertEquals("1.0.0-pilot.3", available.manifest.versionName)
         assertEquals(2, available.currentVersionCode)
         assertEquals("1.0.0-pilot.2", available.currentVersionName)
+    }
+
+    // =========================================================================
+    // 9. Throttling and Local Caching
+    // =========================================================================
+    @Test
+    fun test9_throttling_skipsChecksWithinThrottleWindow() {
+        val configStore = UpdateConfigStore(dummyContext)
+        val now = System.currentTimeMillis()
+        configStore.recordCheckTimestamp(now)
+
+        // Should throttle if checked just now
+        assertTrue(configStore.shouldThrottleForegroundCheck(15 * 60 * 1000L))
+
+        // Should not throttle if checked 20 minutes ago
+        configStore.recordCheckTimestamp(now - (20 * 60 * 1000L))
+        assertFalse(configStore.shouldThrottleForegroundCheck(15 * 60 * 1000L))
+    }
+
+    @Test
+    fun test10_manifestCaching_savesAndRetrievesOfflineInfo() {
+        val configStore = UpdateConfigStore(dummyContext)
+        val manifest = UpdateManifest.fromJson(validManifestJson)
+        configStore.saveLastKnownManifest(manifest)
+
+        val retrieved = configStore.getLastKnownManifest()
+        assertNotNull(retrieved)
+        assertEquals(manifest.applicationId, retrieved!!.applicationId)
+        assertEquals(manifest.versionCode, retrieved.versionCode)
+        assertEquals(manifest.versionName, retrieved.versionName)
+        assertEquals(manifest.sha256, retrieved.sha256)
     }
 }
 

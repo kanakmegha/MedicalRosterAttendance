@@ -63,19 +63,11 @@ fun RosterDashboardScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f, fill = false)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "Medical Rosters",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                IconButton(
-                                    onClick = onConfigureEndpoint,
-                                    modifier = Modifier.size(32.dp).padding(start = 4.dp)
-                                ) {
-                                    Text("⚙️", style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
+                            Text(
+                                "Medical Rosters",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
                             Text(
                                 "Offline Local Storage · Private App Files",
                                 style = MaterialTheme.typography.bodySmall,

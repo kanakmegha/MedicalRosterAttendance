@@ -38,8 +38,7 @@ import java.util.Locale
 fun AppUpdateDialog(
     state: UpdateUiState,
     updateManager: AppUpdateManager,
-    onLaunchIntent: (Intent) -> Unit,
-    onConfigureEndpoint: (() -> Unit)? = null
+    onLaunchIntent: (Intent) -> Unit
 ) {
     if (state is UpdateUiState.Idle) return
 
@@ -216,6 +215,16 @@ fun AppUpdateDialog(
                                     )
                                 }
                             }
+
+                            if (state.isMandatory) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = "This update is required (minimum supported build: ${manifest.minimumSupportedVersionCode}). Your local rosters, shifts, and attendance records will be preserved.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
 
                         Row(
@@ -224,13 +233,13 @@ fun AppUpdateDialog(
                         ) {
                             if (!state.isMandatory) {
                                 AppOutlinedButton(
-                                    text = "Remind Me Later",
+                                    text = "Later",
                                     onClick = { updateManager.deferUpdate(manifest.versionCode) },
                                     modifier = Modifier.weight(1f)
                                 )
                             }
                             AppButton(
-                                text = "Download & Verify",
+                                text = "Update",
                                 onClick = { updateManager.startDownload(manifest) },
                                 modifier = Modifier.weight(1f)
                             )
@@ -462,16 +471,7 @@ fun AppUpdateDialog(
                                 onClick = { updateManager.dismiss() },
                                 modifier = Modifier.weight(1f)
                             )
-                            if (isNotConfigured && onConfigureEndpoint != null) {
-                                AppButton(
-                                    text = "⚙️ Configure (Admin)",
-                                    onClick = {
-                                        updateManager.dismiss()
-                                        onConfigureEndpoint()
-                                    },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            } else if (state.canRetry && state.manifest != null) {
+                            if (state.canRetry && state.manifest != null) {
                                 AppButton(
                                     text = "Retry",
                                     onClick = { updateManager.startDownload(state.manifest) },

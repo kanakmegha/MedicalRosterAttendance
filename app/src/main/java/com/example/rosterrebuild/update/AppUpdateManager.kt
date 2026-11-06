@@ -62,6 +62,10 @@ class AppUpdateManager(
      * @param isManual True if initiated by the user explicitly clicking "Check for Updates"
      */
     fun checkForUpdates(isManual: Boolean = false) {
+        if (!isManual && configStore.shouldThrottleForegroundCheck()) {
+            return
+        }
+
         if (_uiState.value is UpdateUiState.Checking ||
             _uiState.value is UpdateUiState.Downloading ||
             _uiState.value is UpdateUiState.Verifying) {
@@ -73,6 +77,8 @@ class AppUpdateManager(
 
             when (val checkResult = fetcher.checkForUpdates()) {
                 is UpdateCheckResult.UpdateAvailable -> {
+                    configStore.saveLastKnownManifest(checkResult.manifest)
+
                     // Check if this version was deferred in this session and not manual
                     if (!isManual && !checkResult.isMandatory && checkResult.manifest.versionCode == deferredVersionCode) {
                         _uiState.value = UpdateUiState.Idle
@@ -85,6 +91,8 @@ class AppUpdateManager(
                     )
                 }
                 is UpdateCheckResult.UpToDate -> {
+                    configStore.saveLastKnownManifest(checkResult.manifest)
+
                     _uiState.value = if (isManual) {
                         UpdateUiState.UpToDate(
                             currentVersionCode = checkResult.currentVersionCode,
@@ -108,6 +116,21 @@ class AppUpdateManager(
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Called when the app returns to the foreground.
+     * Handles pending permission return or triggers throttled automatic check.
+     */
+    fun onAppForegrounded() {
+        val currentState = _uiState.value
+        if (currentState is UpdateUiState.PermissionRequired) {
+            recheckInstallPermission(currentState.apkFile, currentState.manifest)
+            return
+        }
+        if (currentState is UpdateUiState.Idle) {
+            checkForUpdates(isManual = false)
         }
     }
 
