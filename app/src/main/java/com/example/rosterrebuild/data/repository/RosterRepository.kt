@@ -36,6 +36,14 @@ class RosterRepository(
 
     fun getAllRostersFlow(): Flow<List<RosterEntity>> = rosterDao.getAllRostersFlow()
 
+    suspend fun getAllRosters(): List<RosterEntity> = withContext(Dispatchers.IO) {
+        rosterDao.getAllRosters()
+    }
+
+    suspend fun getRostersForEmployee(employeeId: String): List<RosterEntity> = withContext(Dispatchers.IO) {
+        rosterDao.getRostersForEmployee(employeeId)
+    }
+
     fun getActiveRostersFlow(): Flow<List<RosterEntity>> = rosterDao.getActiveRostersFlow()
 
     suspend fun getRoster(id: String): RosterEntity? = withContext(Dispatchers.IO) {

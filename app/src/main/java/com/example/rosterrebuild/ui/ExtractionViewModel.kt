@@ -23,13 +23,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.time.Clock
+import java.time.LocalDate
 
 enum class ActiveScreen {
     SAVED_ROSTERS_DASHBOARD,
     ROSTER_UPLOAD,
     ROSTER_REVIEW,
     MONTHLY_CALENDAR,
-    DAILY_EDITOR
+    DAILY_EDITOR,
+    MY_ROSTERS
 }
 
 enum class ExtractionStatus {
@@ -37,6 +40,22 @@ enum class ExtractionStatus {
     RUNNING,
     SUCCESS,
     ERROR
+}
+
+data class TodayScheduleUiState(
+    val date: java.time.LocalDate,
+    val employeeId: String,
+    val result: TodayScheduleResult,
+    val upcomingShift: UpcomingShiftResult? = null,
+    val isLoading: Boolean = false
+) {
+    val roster: RosterEntity? get() = (result as? TodayScheduleResult.Success)?.roster
+    val entry: DailyScheduleEntry? get() = (result as? TodayScheduleResult.Success)?.entry
+    val emptyReason: String? get() = when (result) {
+        is TodayScheduleResult.NoRoster -> result.reason
+        is TodayScheduleResult.NoEntryInRoster -> result.reason
+        is TodayScheduleResult.Success -> null
+    }
 }
 
 data class ExtractionUiState(
@@ -63,7 +82,9 @@ data class ExtractionUiState(
     val activeRoster: RosterEntity? = null,
     val currentScreen: ActiveScreen = ActiveScreen.SAVED_ROSTERS_DASHBOARD,
     val pendingRosterId: String? = null,
-    val editingDay: Int? = null
+    val editingDay: Int? = null,
+    val calendarDisplayedYear: Int? = null,
+    val calendarDisplayedMonth: Int? = null
 )
 
 class ExtractionViewModel(
@@ -132,6 +153,22 @@ class ExtractionViewModel(
     )
     val uiState: StateFlow<ExtractionUiState> = _uiState.asStateFlow()
 
+    val clock: Clock get() = repository.getClock()
+
+    private val _todayScheduleState = MutableStateFlow(
+        TodayScheduleUiState(
+            date = LocalDate.now(repository.getClock()),
+            employeeId = savedStateHandle[KEY_EMPLOYEE_ID] ?: "ABHL341",
+            result = TodayScheduleResult.NoRoster(
+                date = LocalDate.now(repository.getClock()),
+                employeeId = savedStateHandle[KEY_EMPLOYEE_ID] ?: "ABHL341",
+                reason = "Checking saved rosters..."
+            ),
+            isLoading = true
+        )
+    )
+    val todayScheduleState: StateFlow<TodayScheduleUiState> = _todayScheduleState.asStateFlow()
+
     private var extractionJob: Job? = null
     // In-memory cache for the decoded Bitmap during active session
     private var inMemorySourceBitmap: Bitmap? = null
@@ -142,6 +179,13 @@ class ExtractionViewModel(
     fun isBitmapInUse(): Boolean = isBitmapInUseByOcr
 
     init {
+        // Automatically sync today's schedule when any roster changes
+        viewModelScope.launch {
+            repository.getAllRostersFlow().collect {
+                refreshTodaySchedule()
+            }
+        }
+
         // Detect if process was recreated during an incomplete extraction
         val savedStatus = savedStateHandle.get<String>(KEY_STATUS)
         val savedRosterId = savedStateHandle.get<String>(KEY_ACTIVE_ROSTER_ID)
@@ -174,6 +218,8 @@ class ExtractionViewModel(
                 }
             }
         }
+
+        refreshTodaySchedule()
     }
 
     private var screenBeforeEditor: ActiveScreen = ActiveScreen.MONTHLY_CALENDAR
@@ -205,6 +251,7 @@ class ExtractionViewModel(
         val trimmed = id.trim()
         savedStateHandle[KEY_EMPLOYEE_ID] = trimmed
         _uiState.update { it.copy(employeeId = trimmed) }
+        refreshTodaySchedule()
     }
 
     fun setManualPeriod(month: String, year: String) {
@@ -763,6 +810,7 @@ class ExtractionViewModel(
                     )
                 }
             }
+            refreshTodaySchedule()
             Result.success(Unit)
         } catch (e: Exception) {
             android.util.Log.e("ExtractionViewModel", "Failed to save attendance record", e)
@@ -865,10 +913,126 @@ class ExtractionViewModel(
                     )
                 }
             }
+            refreshTodaySchedule()
             Result.success(Unit)
         } catch (e: Exception) {
             android.util.Log.e("ExtractionViewModel", "Failed to save daily schedule edit", e)
             Result.failure(e)
+        }
+    }
+
+    suspend fun saveDailyScheduleEditForRoster(
+        rosterId: String,
+        day: Int,
+        newShiftCode: String,
+        newFloor: String?,
+        author: String = "Clinical Supervisor",
+        reason: String? = null
+    ): Result<Unit> = withContext(Dispatchers.Main) {
+        try {
+            repository.saveDailyScheduleEdit(
+                rosterId = rosterId,
+                day = day,
+                newShiftCode = newShiftCode,
+                newFloor = newFloor,
+                author = author,
+                reason = reason
+            )
+            if (_uiState.value.activeRoster?.id == rosterId) {
+                val updatedSchedule = repository.getRosterSchedule(rosterId)
+                _uiState.update { it.copy(schedule = updatedSchedule) }
+            }
+            refreshTodaySchedule()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            android.util.Log.e("ExtractionViewModel", "Failed to save daily schedule edit for roster $rosterId", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun saveAttendanceForRoster(
+        rosterId: String,
+        date: String,
+        newStatus: AttendanceStatus,
+        notes: String? = null,
+        author: String = "Clinical Supervisor"
+    ): Result<Unit> = withContext(Dispatchers.Main) {
+        try {
+            val employeeId = _uiState.value.employeeId
+            repository.updateAttendance(
+                employeeId = employeeId,
+                date = date,
+                rosterId = rosterId,
+                newStatus = newStatus,
+                notes = notes,
+                author = author
+            )
+            if (_uiState.value.activeRoster?.id == rosterId) {
+                val updatedSchedule = repository.getRosterSchedule(rosterId)
+                _uiState.update { it.copy(schedule = updatedSchedule) }
+            }
+            refreshTodaySchedule()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            android.util.Log.e("ExtractionViewModel", "Failed to save attendance for roster $rosterId", e)
+            Result.failure(e)
+        }
+    }
+
+    fun selectCalendarMonth(year: Int, month: Int) {
+        viewModelScope.launch {
+            val empId = _uiState.value.employeeId
+            val empRosters = repository.getRostersForEmployee(empId)
+            val periodRosters = empRosters.filter { it.year == year && it.month == month }
+            val target = periodRosters.firstOrNull { it.status == "ACTIVE" }
+                ?: periodRosters.maxWithOrNull(
+                    compareBy<RosterEntity> { it.version }.thenBy { it.uploadTimestamp }
+                )
+
+            if (target != null) {
+                loadRosterById(target.id)
+                _uiState.update {
+                    it.copy(
+                        calendarDisplayedYear = year,
+                        calendarDisplayedMonth = month
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        activeRoster = null,
+                        schedule = emptyList(),
+                        calendarDisplayedYear = year,
+                        calendarDisplayedMonth = month
+                    )
+                }
+            }
+        }
+    }
+
+    fun refreshTodaySchedule(targetDate: LocalDate = LocalDate.now(repository.getClock())) {
+        viewModelScope.launch {
+            val empId = _uiState.value.employeeId
+            val allRosters = repository.getAllRosters()
+            val result = TodayScheduleResolver.resolveTodaySchedule(
+                rosters = allRosters,
+                employeeId = empId,
+                targetDate = targetDate,
+                scheduleProvider = { rosterId -> repository.getRosterSchedule(rosterId) }
+            )
+            val upcoming = TodayScheduleResolver.findUpcomingShift(
+                rosters = allRosters,
+                employeeId = empId,
+                targetDate = targetDate,
+                scheduleProvider = { rosterId -> repository.getRosterSchedule(rosterId) }
+            )
+            _todayScheduleState.value = TodayScheduleUiState(
+                date = targetDate,
+                employeeId = empId,
+                result = result,
+                upcomingShift = upcoming,
+                isLoading = false
+            )
         }
     }
 
@@ -885,6 +1049,7 @@ class ExtractionViewModel(
                     )
                 }
             }
+            refreshTodaySchedule()
         }
     }
 

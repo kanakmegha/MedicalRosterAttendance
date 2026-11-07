@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -82,25 +83,25 @@ fun getAttendanceBadgeStyle(status: AttendanceStatus?): AttendanceBadgeStyle = w
         background = Color(0xFFE8F5E9),
         border = Color(0xFF81C784),
         text = Color(0xFF2E7D32),
-        label = "✓ Present"
+        label = "✓"
     )
     AttendanceStatus.ABSENT -> AttendanceBadgeStyle(
         background = Color(0xFFFFEBEE),
         border = Color(0xFFE57373),
         text = Color(0xFFC62828),
-        label = "✕ Absent"
+        label = "✕"
     )
     AttendanceStatus.NOT_MARKED -> AttendanceBadgeStyle(
         background = Color(0xFFFFF8E1),
         border = Color(0xFFFFD54F),
         text = Color(0xFFF57F17),
-        label = "○ Unmarked"
+        label = "●"
     )
     AttendanceStatus.NOT_APPLICABLE, null -> AttendanceBadgeStyle(
-        background = Color(0xFFF5F5F7),
-        border = Color(0xFFE0E0E0),
-        text = Color(0xFF616161),
-        label = "— N/A"
+        background = Color.Transparent,
+        border = Color.Transparent,
+        text = Color.Transparent,
+        label = ""
     )
 }
 
@@ -172,7 +173,10 @@ fun MonthlyCalendarScreen(
     onNavigateToDashboard: (() -> Unit)? = null,
     onOpenDailyEditor: ((Int) -> Unit)? = null,
     onUpdateAttendance: ((date: String, newStatus: AttendanceStatus, notes: String?, author: String) -> Unit)? = null,
-    onSaveAttendance: (suspend (date: String, newStatus: AttendanceStatus, notes: String?, author: String) -> Result<Unit>)? = null
+    onSaveAttendance: (suspend (date: String, newStatus: AttendanceStatus, notes: String?, author: String) -> Result<Unit>)? = null,
+    onNavigateMonth: ((year: Int, month: Int) -> Unit)? = null,
+    onUploadNew: (() -> Unit)? = null,
+    clock: java.time.Clock = java.time.Clock.systemDefaultZone()
 ) {
     var displayedYear by remember(initialYear) { mutableStateOf(initialYear) }
     var displayedMonth by remember(initialMonth) { mutableStateOf(initialMonth) }
@@ -185,14 +189,17 @@ fun MonthlyCalendarScreen(
     var editingEntry by remember { mutableStateOf<DailyScheduleEntry?>(null) }
     var attendanceEntryToEdit by remember { mutableStateOf<DailyScheduleEntry?>(null) }
 
+    val today = remember(clock, displayedYear, displayedMonth) { LocalDate.now(clock) }
+    val isViewingCurrentMonth = (displayedYear == today.year && displayedMonth == today.monthValue)
+
     val daysInMonth = remember(displayedYear, displayedMonth) {
         CalendarDomain.getDaysInMonth(displayedYear, displayedMonth)
     }
     val firstDayOffset = remember(displayedYear, displayedMonth) {
         CalendarDomain.getFirstDayOfWeekOffset(displayedYear, displayedMonth)
     }
-    val calendarDays = remember(displayedYear, displayedMonth, schedule) {
-        CalendarDomain.buildMonthDays(displayedYear, displayedMonth, schedule)
+    val calendarDays = remember(displayedYear, displayedMonth, schedule, today) {
+        CalendarDomain.buildMonthDays(displayedYear, displayedMonth, schedule, today)
     }
 
     Column(
@@ -242,13 +249,10 @@ fun MonthlyCalendarScreen(
                     onClick = {
                         val prevMonth = if (displayedMonth == 1) 12 else displayedMonth - 1
                         val prevYear = if (displayedMonth == 1) displayedYear - 1 else displayedYear
-                        if (prevYear == initialYear && prevMonth == initialMonth) {
-                            displayedYear = prevYear
-                            displayedMonth = prevMonth
-                            navNotice = null
-                        } else {
-                            navNotice = "Navigation limited: No uploaded roster schedule for ${CalendarDomain.formatMonthHeader(prevYear, prevMonth)}."
-                        }
+                        displayedYear = prevYear
+                        displayedMonth = prevMonth
+                        navNotice = null
+                        onNavigateMonth?.invoke(prevYear, prevMonth)
                     }
                 ) {
                     Text("◀", style = MaterialTheme.typography.titleMedium, color = IndigoPrimary, fontWeight = FontWeight.Bold)
@@ -275,13 +279,10 @@ fun MonthlyCalendarScreen(
                     onClick = {
                         val nextMonth = if (displayedMonth == 12) 1 else displayedMonth + 1
                         val nextYear = if (displayedMonth == 12) displayedYear + 1 else displayedYear
-                        if (nextYear == initialYear && nextMonth == initialMonth) {
-                            displayedYear = nextYear
-                            displayedMonth = nextMonth
-                            navNotice = null
-                        } else {
-                            navNotice = "Navigation limited: No uploaded roster schedule for ${CalendarDomain.formatMonthHeader(nextYear, nextMonth)}."
-                        }
+                        displayedYear = nextYear
+                        displayedMonth = nextMonth
+                        navNotice = null
+                        onNavigateMonth?.invoke(nextYear, nextMonth)
                     }
                 ) {
                     Text("▶", style = MaterialTheme.typography.titleMedium, color = IndigoPrimary, fontWeight = FontWeight.Bold)
@@ -289,7 +290,80 @@ fun MonthlyCalendarScreen(
             }
         }
 
-        // Navigation Notice when user attempts to jump to a non-uploaded month
+        // Contextual Banner when viewing another month's roster
+        if (!isViewingCurrentMonth) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                shape = RoundedCornerShape(8.dp),
+                color = LavenderSurface,
+                border = BorderStroke(1.dp, LavenderBorder)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val todayFmt = DateTimeFormatter.ofPattern("EEE, d MMM yyyy", Locale.ENGLISH)
+                    Text(
+                        text = "📅 Today: ${today.format(todayFmt)} (Viewing other month)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = IndigoDark,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        onClick = {
+                            displayedYear = today.year
+                            displayedMonth = today.monthValue
+                            onNavigateMonth?.invoke(today.year, today.monthValue)
+                        },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                    ) {
+                        Text("Go to Today", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = IndigoPrimary)
+                    }
+                }
+            }
+        }
+
+        // Explanation when navigating to a month without a saved roster
+        if (schedule.isEmpty()) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = "No saved roster for ${CalendarDomain.formatMonthHeader(displayedYear, displayedMonth)} (Employee: $employeeId)",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "The calendar grid displays dates for this month without simulated shifts.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+
+        // Navigation Notice if present
         navNotice?.let { notice ->
             Card(
                 modifier = Modifier
@@ -358,7 +432,7 @@ fun MonthlyCalendarScreen(
             items(firstDayOffset) {
                 Box(
                     modifier = Modifier
-                        .defaultMinSize(minHeight = 74.dp)
+                        .defaultMinSize(minHeight = 84.dp)
                         .background(Color.Transparent)
                 )
             }
@@ -460,20 +534,26 @@ fun CalendarDateCell(
     val attendance = entry?.attendance
     val badgeStyle = getAttendanceBadgeStyle(attendance?.status)
 
+    val hasEntry = entry != null
+    val defaultCellBg = if (hasEntry) colors.background else Color(0xFFFAFAFA)
+    val defaultCellBorder = if (hasEntry) colors.border else Color(0xFFE2E8F0)
+
     Card(
-        modifier = Modifier.defaultMinSize(minHeight = 78.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 84.dp),
         shape = RoundedCornerShape(6.dp),
         colors = CardDefaults.cardColors(
-            containerColor = colors.background
+            containerColor = if (day.isToday) defaultCellBg.copy(alpha = 0.95f) else defaultCellBg
         ),
-        border = androidx.compose.foundation.BorderStroke(
+        border = BorderStroke(
             width = if (day.isToday) 2.dp else 1.dp,
-            color = if (day.isToday) IndigoPrimary else colors.border
+            color = if (day.isToday) IndigoPrimary else defaultCellBorder
         )
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
                 .padding(2.dp),
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
@@ -484,11 +564,10 @@ fun CalendarDateCell(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
                     .clip(RoundedCornerShape(4.dp))
-                    .clickable(onClick = onClick)
-                    .padding(horizontal = 2.dp, vertical = 1.dp),
-                verticalArrangement = Arrangement.SpaceBetween,
+                    .then(if (hasEntry) Modifier.clickable(onClick = onClick) else Modifier)
+                    .padding(horizontal = 2.dp, vertical = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Header: Day number + Today badge + Review Warning icon
@@ -499,9 +578,11 @@ fun CalendarDateCell(
                 ) {
                     Text(
                         text = "${day.dayOfMonth}",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (day.isToday) MaterialTheme.colorScheme.primary else Color.DarkGray
+                        style = TextStyle(
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        ),
+                        color = if (day.isToday) IndigoPrimary else Color(0xFF1E293B)
                     )
 
                     Row(
@@ -514,13 +595,18 @@ fun CalendarDateCell(
                         if (day.isToday) {
                             Box(
                                 modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
-                                    .padding(horizontal = 2.dp, vertical = 0.5.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(IndigoPrimary)
+                                    .padding(horizontal = 3.dp, vertical = 1.dp)
                             ) {
                                 Text(
                                     "TODAY",
-                                    style = TextStyle(fontSize = 6.sp, fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onPrimary
+                                    style = TextStyle(
+                                        fontSize = 6.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        letterSpacing = 0.5.sp
+                                    ),
+                                    color = Color.White
                                 )
                             }
                         }
@@ -534,17 +620,20 @@ fun CalendarDateCell(
                 ) {
                     val displayCode = entry?.currentShiftCode?.takeIf { it.isNotBlank() }
                         ?: entry?.extractedShiftCode?.takeIf { it.isNotBlank() }
-                        ?: "—"
+                        ?: ""
                     Text(
                         text = displayCode,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
+                        style = TextStyle(
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        ),
                         color = colors.text
                     )
                     if (entry?.isProvisional == true) {
                         Box(
                             modifier = Modifier
-                                .background(Color(0xFF0288D1), RoundedCornerShape(2.dp))
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(Color(0xFF0288D1))
                                 .padding(horizontal = 2.dp)
                         ) {
                             Text(
@@ -560,7 +649,7 @@ fun CalendarDateCell(
                 if (entry?.isModified == true) {
                     Text(
                         text = "orig: ${entry.extractedShiftCode}",
-                        style = TextStyle(fontSize = 7.sp, fontWeight = FontWeight.Bold),
+                        style = TextStyle(fontSize = 7.5.sp, fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.error,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -571,17 +660,21 @@ fun CalendarDateCell(
                 val floorText = if (entry?.currentShift?.isWorkShift == true) {
                     entry.currentFloor?.takeIf { it.isNotBlank() } ?: "No floor"
                 } else if (entry?.isFloorModified == true && !entry.currentFloor.isNullOrBlank()) {
-                    entry.currentFloor
+                    entry.currentFloor ?: ""
                 } else {
-                    "—"
+                    ""
                 }
-                Text(
-                    text = floorText,
-                    style = TextStyle(fontSize = 7.5.sp, fontWeight = FontWeight.Normal),
-                    color = if (entry?.currentShift?.isWorkShift == true && entry.currentFloor != null) Color.DarkGray else Color.Gray,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (floorText.isNotBlank()) {
+                    Text(
+                        text = floorText,
+                        style = TextStyle(fontSize = 8.sp, fontWeight = FontWeight.Normal),
+                        color = if (entry?.currentShift?.isWorkShift == true && entry.currentFloor != null) Color.DarkGray else Color.Gray,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else {
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
             }
 
             Spacer(modifier = Modifier.height(2.dp))
@@ -592,28 +685,30 @@ fun CalendarDateCell(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(20.dp)
+                    .height(18.dp)
                     .clip(RoundedCornerShape(3.dp))
                     .then(
-                        if (onAttendanceClick != null) {
+                        if (hasEntry && onAttendanceClick != null) {
                             Modifier.clickable(onClick = onAttendanceClick)
                         } else Modifier
                     ),
                 shape = RoundedCornerShape(3.dp),
                 color = badgeStyle.background,
-                border = BorderStroke(0.5.dp, badgeStyle.border)
+                border = if (badgeStyle.label.isNotEmpty()) BorderStroke(0.5.dp, badgeStyle.border) else null
             ) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = badgeStyle.label,
-                        style = TextStyle(fontSize = 7.sp, fontWeight = FontWeight.Bold),
-                        color = badgeStyle.text,
-                        maxLines = 1,
-                        textAlign = TextAlign.Center
-                    )
+                    if (badgeStyle.label.isNotEmpty()) {
+                        Text(
+                            text = badgeStyle.label,
+                            style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.ExtraBold),
+                            color = badgeStyle.text,
+                            maxLines = 1,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             }
         }
@@ -635,7 +730,7 @@ fun CalendarAttendanceDialog(
     val coroutineScope = rememberCoroutineScope()
     var selectedStatus by remember { mutableStateOf(entry.attendance.status) }
     var notes by remember { mutableStateOf(entry.attendance.notes ?: "") }
-    var author by remember { mutableStateOf("Clinical Supervisor") }
+    val author = "Self-reported"
 
     var isSaving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -653,18 +748,16 @@ fun CalendarAttendanceDialog(
         }
     }
 
-    val defaultStatus = remember(entry.currentShift) {
-        AttendanceStatus.defaultForShift(entry.currentShift)
-    }
-
     val shiftColors = remember(entry.currentShift) {
         getShiftColors(entry.currentShift)
     }
 
+    val isNonWork = !entry.currentShift.isWorkShift
+    val isInvalidNonWorkSelection = isNonWork && (selectedStatus == AttendanceStatus.PRESENT || selectedStatus == AttendanceStatus.ABSENT)
+
     val statusChanged = selectedStatus != entry.attendance.status
     val notesChanged = notes.trim() != (entry.attendance.notes ?: "")
-    val authorChanged = author.trim() != "Clinical Supervisor"
-    val hasChanges = statusChanged || notesChanged || authorChanged || entry.attendance.isFlaggedForReview
+    val hasChanges = (statusChanged || notesChanged || entry.attendance.isFlaggedForReview) && !isInvalidNonWorkSelection
 
     AlertDialog(
         onDismissRequest = {
@@ -690,7 +783,7 @@ fun CalendarAttendanceDialog(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // Error banner if save failed
                 errorMessage?.let { err ->
@@ -710,6 +803,21 @@ fun CalendarAttendanceDialog(
                                 fontWeight = FontWeight.Medium
                             )
                         }
+                    }
+                }
+
+                // Invalid non-work selection warning
+                if (isInvalidNonWorkSelection) {
+                    InfoCard(
+                        containerColor = ErrorContainer,
+                        borderColor = ErrorRed.copy(alpha = 0.5f)
+                    ) {
+                        Text(
+                            text = "Rest days (OFF) and Absences (A) cannot be marked Present or Absent. Please select Not Applicable, or change the scheduled duty via Daily Editor.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnErrorContainer,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
                 }
 
@@ -750,7 +858,7 @@ fun CalendarAttendanceDialog(
                 ) {
                     Text(
                         text = "Scheduled Duty (Read-Only)",
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         color = IndigoDark
                     )
@@ -790,38 +898,26 @@ fun CalendarAttendanceDialog(
                                 )
                             }
                         }
-
-                        StatusBadge(
-                            text = "Default: ${defaultStatus.displayName}",
-                            variant = StatusBadgeVariant.NEUTRAL
-                        )
                     }
-                    Text(
-                        text = "To edit planned shift or floor assignment, open the Daily Editor.",
-                        style = TextStyle(fontSize = 10.5.sp),
-                        color = TextSecondary
-                    )
                 }
 
-                // Card 2: Attendance Status Selection (4 clinical cards)
+                // Card 2: Attendance Status Selection (4 compact choices)
                 Text(
                     text = "Select Attendance Status",
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
                 )
 
                 val options = listOf(
-                    Triple(AttendanceStatus.PRESENT, "✓", "Staff attended scheduled clinical duty"),
-                    Triple(AttendanceStatus.ABSENT, "✕", "Staff did not attend scheduled clinical duty"),
-                    Triple(AttendanceStatus.NOT_MARKED, "○", "Attendance not yet marked for this shift"),
-                    Triple(AttendanceStatus.NOT_APPLICABLE, "—", "Rest day (OFF) or management absence (A)")
+                    Triple(AttendanceStatus.PRESENT, "✓", "Present — Attended scheduled clinical duty"),
+                    Triple(AttendanceStatus.ABSENT, "✕", "Absent — Did not attend scheduled clinical duty"),
+                    Triple(AttendanceStatus.NOT_MARKED, "●", "Not Marked — Attendance not yet recorded"),
+                    Triple(AttendanceStatus.NOT_APPLICABLE, "—", "Not Applicable — Rest day (OFF) or absence (A)")
                 )
 
                 options.forEach { (status, icon, desc) ->
                     val isSelected = selectedStatus == status
-                    val isDefault = defaultStatus == status
-                    val isCurrentSaved = entry.attendance.status == status
                     val style = getAttendanceBadgeStyle(status)
 
                     Card(
@@ -831,62 +927,58 @@ fun CalendarAttendanceDialog(
                                 selectedStatus = status
                                 errorMessage = null
                             },
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(6.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = if (isSelected) LavenderSurface else SurfaceClinical
                         ),
                         border = BorderStroke(
-                            width = if (isSelected) 2.dp else 1.dp,
+                            width = if (isSelected) 1.5.dp else 1.dp,
                             color = if (isSelected) IndigoPrimary else LavenderBorder
                         )
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(10.dp),
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(30.dp)
-                                        .background(style.background, RoundedCornerShape(6.dp))
-                                        .border(1.dp, style.border, RoundedCornerShape(6.dp)),
+                                        .size(24.dp)
+                                        .background(
+                                            if (style.label.isNotEmpty()) style.background else Color(0xFFF1F5F9),
+                                            RoundedCornerShape(4.dp)
+                                        )
+                                        .border(
+                                            0.5.dp,
+                                            if (style.label.isNotEmpty()) style.border else Color(0xFFCBD5E1),
+                                            RoundedCornerShape(4.dp)
+                                        ),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = icon,
-                                        style = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold),
-                                        color = style.text
+                                        style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                                        color = if (style.label.isNotEmpty()) style.text else Color(0xFF64748B)
                                     )
                                 }
 
-                                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Text(
-                                            text = status.displayName,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                            color = TextPrimary
-                                        )
-                                        if (isDefault) {
-                                            StatusBadge(text = "Default", variant = StatusBadgeVariant.NEUTRAL)
-                                        }
-                                        if (isCurrentSaved) {
-                                            StatusBadge(text = "Saved", variant = StatusBadgeVariant.PRIMARY)
-                                        }
-                                    }
+                                Column {
+                                    Text(
+                                        text = status.displayName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = TextPrimary
+                                    )
                                     Text(
                                         text = desc,
-                                        style = MaterialTheme.typography.bodySmall,
+                                        style = MaterialTheme.typography.labelSmall,
                                         color = TextSecondary
                                     )
                                 }
@@ -912,19 +1004,8 @@ fun CalendarAttendanceDialog(
                         errorMessage = null
                     },
                     label = "Attendance Notes (Optional)",
-                    placeholder = "e.g. Arrived on time, medical leave certificate submitted, emergency cover",
+                    placeholder = "e.g. Arrived on time, emergency cover",
                     singleLine = false
-                )
-
-                // Card 4: Supervisor / Author
-                ConsistentTextField(
-                    value = author,
-                    onValueChange = {
-                        author = it
-                        errorMessage = null
-                    },
-                    label = "Supervisor / Author",
-                    placeholder = "Clinical Supervisor"
                 )
             }
         },
@@ -937,7 +1018,7 @@ fun CalendarAttendanceDialog(
                         val res = onSave(
                             selectedStatus,
                             notes.trim().ifBlank { null },
-                            author.trim().ifBlank { "Clinical Supervisor" }
+                            author
                         )
                         isSaving = false
                         res.onSuccess {

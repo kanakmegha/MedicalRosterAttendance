@@ -71,8 +71,16 @@ import com.example.rosterrebuild.ui.ActiveScreen
 import com.example.rosterrebuild.ui.DailyEditorScreen
 import com.example.rosterrebuild.ui.ExtractionStatus
 import com.example.rosterrebuild.ui.ExtractionViewModel
+import com.example.rosterrebuild.ui.MyRostersScreen
 import com.example.rosterrebuild.ui.RosterDashboardScreen
 import com.example.rosterrebuild.ui.RosterReviewScreen
+import com.example.rosterrebuild.ui.SettingsDialog
+import com.example.rosterrebuild.ui.UpdateEndpointDialog
+import com.example.rosterrebuild.update.UpdateConfigStore
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.ui.unit.sp
 import com.example.rosterrebuild.ui.AppUpdateDialog
 import com.example.rosterrebuild.ui.components.*
 import com.example.rosterrebuild.ui.theme.*
@@ -115,6 +123,7 @@ class MainActivity : ComponentActivity() {
         if (::updateManager.isInitialized) {
             updateManager.onAppForegrounded()
         }
+        viewModel.refreshTodaySchedule()
     }
 }
 
@@ -124,6 +133,7 @@ private fun RosterScreen(
     updateManager: AppUpdateManager
 ) {
     val state by viewModel.uiState.collectAsState()
+    val todayScheduleState by viewModel.todayScheduleState.collectAsState()
     val context = LocalContext.current
     val repository = remember { RosterRepository.getInstance(context) }
     val storageManager = remember { StorageManager(context) }
@@ -145,6 +155,9 @@ private fun RosterScreen(
     val currentScreen = state.currentScreen
 
     var showExportDialog by rememberSaveable { mutableStateOf(false) }
+    var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
+    var showEndpointDialog by rememberSaveable { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         repository.recalculateAllRosterStatuses()
@@ -442,12 +455,130 @@ private fun RosterScreen(
         }
     }
 
-    when (currentScreen) {
-        ActiveScreen.SAVED_ROSTERS_DASHBOARD -> {
-            RosterDashboardScreen(
+    val isPrimaryTab = currentScreen in listOf(
+        ActiveScreen.SAVED_ROSTERS_DASHBOARD,
+        ActiveScreen.MONTHLY_CALENDAR
+    )
+
+    if (isPrimaryTab) {
+        Scaffold(
+            bottomBar = {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 4.dp
+                ) {
+                    NavigationBarItem(
+                        icon = { Text("🏠", fontSize = 18.sp) },
+                        label = {
+                            Text(
+                                "Home",
+                                fontWeight = if (currentScreen == ActiveScreen.SAVED_ROSTERS_DASHBOARD) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        selected = currentScreen == ActiveScreen.SAVED_ROSTERS_DASHBOARD,
+                        onClick = { viewModel.navigateTo(ActiveScreen.SAVED_ROSTERS_DASHBOARD) }
+                    )
+                    NavigationBarItem(
+                        icon = { Text("📅", fontSize = 18.sp) },
+                        label = {
+                            Text(
+                                "My Calendar",
+                                fontWeight = if (currentScreen == ActiveScreen.MONTHLY_CALENDAR) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        selected = currentScreen == ActiveScreen.MONTHLY_CALENDAR,
+                        onClick = { viewModel.navigateTo(ActiveScreen.MONTHLY_CALENDAR) }
+                    )
+                }
+            }
+        ) { scaffoldPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(scaffoldPadding)
+            ) {
+                when (currentScreen) {
+                    ActiveScreen.SAVED_ROSTERS_DASHBOARD -> {
+                        RosterDashboardScreen(
+                            rosters = savedRosters,
+                            todayScheduleState = todayScheduleState,
+                            storageManager = storageManager,
+                            onOpenSettings = { showSettingsDialog = true },
+                            onUploadNew = { viewModel.resetForNewUpload() },
+                            onOpenCalendar = { roster ->
+                                viewModel.loadRoster(roster)
+                                viewModel.selectCalendarMonth(roster.year, roster.month)
+                                viewModel.navigateTo(ActiveScreen.MONTHLY_CALENDAR)
+                            },
+                            onViewDetails = { roster ->
+                                viewModel.loadRoster(roster)
+                                viewModel.navigateTo(ActiveScreen.ROSTER_REVIEW)
+                            },
+                            onUploadCorrected = { roster ->
+                                viewModel.prepareCorrectedUpload(roster)
+                            },
+                            onDeleteRoster = { roster ->
+                                viewModel.deleteRoster(roster)
+                            },
+                            onSaveTodayShift = { rosterId, day, newShift, newFloor, author, reason ->
+                                coroutineScope.launch {
+                                    viewModel.saveDailyScheduleEditForRoster(rosterId, day, newShift, newFloor, author, reason)
+                                }
+                            },
+                            onSaveTodayAttendance = { rosterId, date, status, notes, author ->
+                                coroutineScope.launch {
+                                    viewModel.saveAttendanceForRoster(rosterId, date, status, notes, author)
+                                }
+                            }
+                        )
+                    }
+                    ActiveScreen.MONTHLY_CALENDAR -> {
+                        val effectiveYear = state.calendarDisplayedYear
+                            ?: activeRoster?.year ?: detectedPeriod?.year ?: result?.detectedPeriod?.year ?: manualYear.toIntOrNull() ?: 2026
+                        val effectiveMonth = state.calendarDisplayedMonth
+                            ?: activeRoster?.month ?: detectedPeriod?.month ?: result?.detectedPeriod?.month ?: manualMonth.toIntOrNull() ?: 6
+                        MonthlyCalendarScreen(
+                            schedule = scheduleState,
+                            employeeId = employeeId,
+                            initialYear = effectiveYear,
+                            initialMonth = effectiveMonth,
+                            onNavigateToReview = { viewModel.navigateTo(ActiveScreen.ROSTER_REVIEW) },
+                            onExportClick = { showExportDialog = true },
+                            onSaveEntry = { updated ->
+                                viewModel.updateEntry(updated)
+                            },
+                            onUpdateShift = onUpdateShift,
+                            onNavigateToDashboard = { viewModel.navigateTo(ActiveScreen.SAVED_ROSTERS_DASHBOARD) },
+                            onOpenDailyEditor = { day ->
+                                viewModel.openDailyEditor(day)
+                            },
+                            onUpdateAttendance = { date, status, notes, author ->
+                                viewModel.updateAttendance(date, status, notes, author)
+                            },
+                            onSaveAttendance = { date, status, notes, author ->
+                                viewModel.saveAttendance(date, status, notes, author)
+                            },
+                            onNavigateMonth = { year, month ->
+                                viewModel.selectCalendarMonth(year, month)
+                            },
+                            onUploadNew = {
+                                viewModel.resetForNewUpload()
+                            },
+                            clock = viewModel.clock
+                        )
+                    }
+                    else -> Unit
+                }
+            }
+        }
+    } else {
+        when (currentScreen) {
+        ActiveScreen.MY_ROSTERS -> {
+            MyRostersScreen(
                 rosters = savedRosters,
                 onOpenCalendar = { roster ->
                     viewModel.loadRoster(roster)
+                    viewModel.selectCalendarMonth(roster.year, roster.month)
                     viewModel.navigateTo(ActiveScreen.MONTHLY_CALENDAR)
                 },
                 onViewDetails = { roster ->
@@ -463,8 +594,7 @@ private fun RosterScreen(
                 onDeleteRoster = { roster ->
                     viewModel.deleteRoster(roster)
                 },
-                storageManager = storageManager,
-                onCheckForUpdates = { updateManager.checkForUpdates(isManual = true) }
+                storageManager = storageManager
             )
         }
         ActiveScreen.DAILY_EDITOR -> {
@@ -483,32 +613,6 @@ private fun RosterScreen(
             } else {
                 viewModel.closeDailyEditor()
             }
-        }
-        ActiveScreen.MONTHLY_CALENDAR -> {
-            val effectiveYear = activeRoster?.year ?: detectedPeriod?.year ?: result?.detectedPeriod?.year ?: manualYear.toIntOrNull() ?: 2026
-            val effectiveMonth = activeRoster?.month ?: detectedPeriod?.month ?: result?.detectedPeriod?.month ?: manualMonth.toIntOrNull() ?: 6
-            MonthlyCalendarScreen(
-                schedule = scheduleState,
-                employeeId = employeeId,
-                initialYear = effectiveYear,
-                initialMonth = effectiveMonth,
-                onNavigateToReview = { viewModel.navigateTo(ActiveScreen.ROSTER_REVIEW) },
-                onExportClick = { showExportDialog = true },
-                onSaveEntry = { updated ->
-                    viewModel.updateEntry(updated)
-                },
-                onUpdateShift = onUpdateShift,
-                onNavigateToDashboard = { viewModel.navigateTo(ActiveScreen.SAVED_ROSTERS_DASHBOARD) },
-                onOpenDailyEditor = { day ->
-                    viewModel.openDailyEditor(day)
-                },
-                onUpdateAttendance = { date, status, notes, author ->
-                    viewModel.updateAttendance(date, status, notes, author)
-                },
-                onSaveAttendance = { date, status, notes, author ->
-                    viewModel.saveAttendance(date, status, notes, author)
-                }
-            )
         }
         ActiveScreen.ROSTER_REVIEW -> {
             val effectiveFloor = activeRoster?.getEffectiveMonthlyFloor()
@@ -763,6 +867,8 @@ private fun RosterScreen(
             }
         }
     }
+    else -> Unit
+}
 }
 
     if (showExportDialog && scheduleState.isNotEmpty()) {
@@ -784,6 +890,21 @@ private fun RosterScreen(
             state = updateState,
             updateManager = updateManager,
             onLaunchIntent = { intent -> context.startActivity(intent) }
+        )
+    }
+
+    if (showSettingsDialog) {
+        SettingsDialog(
+            onDismiss = { showSettingsDialog = false },
+            onCheckForUpdates = { updateManager.checkForUpdates(isManual = true) },
+            onConfigureEndpoint = { showEndpointDialog = true }
+        )
+    }
+
+    if (showEndpointDialog) {
+        UpdateEndpointDialog(
+            configStore = UpdateConfigStore(context),
+            onDismiss = { showEndpointDialog = false }
         )
     }
 }
