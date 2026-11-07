@@ -174,9 +174,9 @@ class UpdateManifestFetcher(
         } catch (_: Exception) {
             PackageInfo().apply {
                 packageName = context.packageName
-                versionName = "1.0.0-pilot.3"
+                versionName = "1.0.0-pilot.4"
                 @Suppress("DEPRECATION")
-                versionCode = 3
+                versionCode = 4
             }
         }
     }
