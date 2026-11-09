@@ -1,74 +1,65 @@
 package com.example.rosterrebuild.ui
 
-import android.content.Context
 import android.content.Intent
-import android.os.Build
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.rosterrebuild.BuildConfig
 import com.example.rosterrebuild.ui.components.AppButton
 import com.example.rosterrebuild.ui.components.AppOutlinedButton
-import com.example.rosterrebuild.ui.components.AppTextButton
 import com.example.rosterrebuild.ui.components.InfoCard
 import com.example.rosterrebuild.ui.theme.*
 import com.example.rosterrebuild.update.AppUpdateManager
-import com.example.rosterrebuild.update.UpdateErrorType
 import com.example.rosterrebuild.update.UpdateUiState
-import java.io.File
-import java.util.Locale
 
+/**
+ * Update prompt dialog implementing system-delegated APK updates.
+ *
+ * Dispatches downloads to Android DownloadManager upon user approval.
+ * Never requests package installer permissions or installs APKs directly.
+ */
 @Composable
 fun AppUpdateDialog(
     state: UpdateUiState,
     updateManager: AppUpdateManager,
-    onLaunchIntent: (Intent) -> Unit
+    onOpenUrl: (String) -> Unit = {}
 ) {
     if (state is UpdateUiState.Idle) return
 
     val context = LocalContext.current
-    val installedVersionCode = getInstalledVersionCode(context)
-    val installedVersionName = getInstalledVersionName(context)
 
-    val isMandatory = when (state) {
-        is UpdateUiState.Available -> state.isMandatory
-        is UpdateUiState.Downloading -> state.manifest.mandatory
-        is UpdateUiState.Verifying -> state.manifest.mandatory
-        is UpdateUiState.ReadyToInstall -> state.manifest.mandatory
-        is UpdateUiState.PermissionRequired -> state.manifest.mandatory
-        is UpdateUiState.Error -> state.manifest?.mandatory == true
-        else -> false
+    fun openBrowser(url: String) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            onOpenUrl(url)
+        }
     }
 
     Dialog(
         onDismissRequest = {
-            if (!isMandatory) {
-                when (state) {
-                    is UpdateUiState.Available -> updateManager.deferUpdate(state.manifest.versionCode)
-                    is UpdateUiState.Downloading -> updateManager.cancelDownload()
-                    else -> updateManager.dismiss()
-                }
+            when (state) {
+                is UpdateUiState.Available -> updateManager.dismissUpdate(state.update.versionName)
+                else -> updateManager.dismissDialog()
             }
         },
         properties = DialogProperties(
-            dismissOnBackPress = !isMandatory,
-            dismissOnClickOutside = !isMandatory,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
             usePlatformDefaultWidth = false
         )
     ) {
@@ -86,7 +77,7 @@ fun AppUpdateDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Header & Status Tag
+                // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -94,46 +85,23 @@ fun AppUpdateDialog(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Hospital Application Update",
+                            text = when (state) {
+                                is UpdateUiState.Available -> "Medical Roster update available"
+                                is UpdateUiState.DownloadEnqueued -> "Download Started"
+                                is UpdateUiState.UpToDate -> "Medical Roster is Up to Date"
+                                is UpdateUiState.Checking -> "Checking for updates…"
+                                is UpdateUiState.Error -> "Update Check"
+                                else -> "Application Update"
+                            },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = IndigoDark
                         )
                         Text(
-                            text = "Installed: v$installedVersionName ($installedVersionCode)",
+                            text = "Installed: v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
-                    }
-
-                    if (isMandatory) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            modifier = Modifier.padding(start = 8.dp)
-                        ) {
-                            Text(
-                                text = "MANDATORY",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    } else if (state is UpdateUiState.Available) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = LavenderBorder,
-                            modifier = Modifier.padding(start = 8.dp)
-                        ) {
-                            Text(
-                                text = "RECOMMENDED",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = IndigoPrimary,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
                     }
                 }
 
@@ -151,7 +119,7 @@ fun AppUpdateDialog(
                         ) {
                             CircularProgressIndicator(color = IndigoPrimary)
                             Text(
-                                text = "Checking for hospital release updates...",
+                                text = "Checking the latest GitHub release…",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TextPrimary
                             )
@@ -164,7 +132,7 @@ fun AppUpdateDialog(
                             borderColor = LavenderBorder
                         ) {
                             Text(
-                                text = "You are running the latest version: v${state.currentVersionName} (${state.currentVersionCode}).",
+                                text = "You are using the latest version (${state.latestVersion}). All your local rosters and shifts are up to date.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TextPrimary
                             )
@@ -175,31 +143,41 @@ fun AppUpdateDialog(
                             horizontalArrangement = Arrangement.End
                         ) {
                             AppButton(
-                                text = "Close",
-                                onClick = { updateManager.dismiss() }
+                                text = "OK",
+                                onClick = { updateManager.dismissDialog() }
                             )
                         }
                     }
 
                     is UpdateUiState.Available -> {
-                        val manifest = state.manifest
+                        val update = state.update
                         InfoCard(
                             containerColor = LavenderSurface,
                             borderColor = LavenderBorder
                         ) {
                             Text(
-                                text = "New Version Available: v${manifest.versionName}",
+                                text = "Version ${update.versionName} is available.",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = IndigoDark
                             )
+
+                            if (update.versionCode != null) {
+                                Text(
+                                    text = "Build: ${update.versionCode}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "Channel: ${manifest.releaseChannel} · Build: ${manifest.versionCode}",
+                                text = "Download the APK update now? When the download completes, tap the download notification and approve the Android installer. Android will keep all your existing data.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
+                                color = TextPrimary
                             )
 
-                            if (manifest.releaseNotes.isNotEmpty()) {
+                            if (!update.releaseNotes.isNullOrBlank()) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text(
                                     text = "Release Notes:",
@@ -207,258 +185,20 @@ fun AppUpdateDialog(
                                     fontWeight = FontWeight.SemiBold,
                                     color = TextPrimary
                                 )
-                                manifest.releaseNotes.forEach { note ->
-                                    Text(
-                                        text = "• $note",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextPrimary
-                                    )
-                                }
-                            }
-
-                            if (state.isMandatory) {
-                                Spacer(modifier = Modifier.height(10.dp))
                                 Text(
-                                    text = "This update is required (minimum supported build: ${manifest.minimumSupportedVersionCode}). Your local rosters, shifts, and attendance records will be preserved.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                    fontWeight = FontWeight.Medium
-                                )
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            if (!state.isMandatory) {
-                                AppOutlinedButton(
-                                    text = "Later",
-                                    onClick = { updateManager.deferUpdate(manifest.versionCode) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            AppButton(
-                                text = "Update",
-                                onClick = { updateManager.startDownload(manifest) },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-
-                    is UpdateUiState.Downloading -> {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                text = "Downloading update v${state.manifest.versionName}...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = TextPrimary
-                            )
-
-                            if (state.percent >= 0) {
-                                LinearProgressIndicator(
-                                    progress = { state.percent / 100f },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(8.dp),
-                                    color = IndigoPrimary,
-                                    trackColor = LavenderBorder
-                                )
-                                val downloadedMb = state.bytesDownloaded / (1024f * 1024f)
-                                val totalMb = state.totalBytes / (1024f * 1024f)
-                                Text(
-                                    text = String.format(Locale.ROOT, "%d%% (%.1f MB / %.1f MB)", state.percent, downloadedMb, totalMb),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = TextSecondary
-                                )
-                            } else {
-                                LinearProgressIndicator(
-                                    modifier = Modifier.fillMaxWidth().height(8.dp),
-                                    color = IndigoPrimary
-                                )
-                                Text(
-                                    text = "Downloading...",
+                                    text = update.releaseNotes,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = TextSecondary
                                 )
                             }
 
-                            if (!isMandatory) {
-                                AppOutlinedButton(
-                                    text = "Cancel Download",
-                                    onClick = { updateManager.cancelDownload() },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                        }
-                    }
-
-                    is UpdateUiState.Verifying -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            CircularProgressIndicator(color = IndigoPrimary)
-                            Text(
-                                text = "Verifying APK integrity and cryptographic signature...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = "Checking SHA-256 and certificate chain before installation",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
-                        }
-                    }
-
-                    is UpdateUiState.PermissionRequired -> {
-                        InfoCard(
-                            containerColor = LavenderSurface,
-                            borderColor = LavenderBorder
-                        ) {
-                            Text(
-                                text = "Permission Required",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = IndigoDark
-                            )
-                            Text(
-                                text = state.explanation,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextPrimary
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            if (!isMandatory) {
-                                AppOutlinedButton(
-                                    text = "Cancel",
-                                    onClick = { updateManager.dismiss() },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            AppButton(
-                                text = "Open Settings",
-                                onClick = {
-                                    onLaunchIntent(state.permissionIntent)
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-
-                    is UpdateUiState.ReadyToInstall -> {
-                        InfoCard(
-                            containerColor = LavenderSurface,
-                            borderColor = LavenderBorder
-                        ) {
-                            Text(
-                                text = "Update Verified & Ready",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = IndigoDark
-                            )
-                            Text(
-                                text = "Cryptographic signature and package identity verified successfully. " +
-                                       "Tap below to launch the Android package installer.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextPrimary
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            if (!isMandatory) {
-                                AppOutlinedButton(
-                                    text = "Install Later",
-                                    onClick = { updateManager.deferUpdate(state.manifest.versionCode) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            AppButton(
-                                text = "Install Update",
-                                onClick = {
-                                    val intent = updateManager.getInstallIntent(state.apkFile)
-                                    if (intent != null) {
-                                        onLaunchIntent(intent)
-                                    }
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-
-                    is UpdateUiState.Error -> {
-                        var showDiagnostics by remember { mutableStateOf(false) }
-
-                        val isNotConfigured = state.errorType == UpdateErrorType.NOT_CONFIGURED
-                        val isTlsError = state.errorType == UpdateErrorType.TLS_TRUST_FAILURE || state.errorType == UpdateErrorType.TLS_EXPIRED
-
-                        InfoCard(
-                            containerColor = if (isNotConfigured)
-                                MaterialTheme.colorScheme.surfaceVariant
-                            else
-                                MaterialTheme.colorScheme.errorContainer,
-                            borderColor = if (isNotConfigured)
-                                MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                            else
-                                MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
-                        ) {
-                            Text(
-                                text = when (state.errorType) {
-                                    UpdateErrorType.NOT_CONFIGURED -> "ℹ️ Updates Not Configured"
-                                    UpdateErrorType.TLS_TRUST_FAILURE -> "🔒 HTTPS Security Notice"
-                                    UpdateErrorType.TLS_EXPIRED -> "⚠️ Security Certificate Expired"
-                                    else -> "📡 Update Check"
-                                },
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isNotConfigured)
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                else
-                                    MaterialTheme.colorScheme.error
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = state.message,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (isNotConfigured)
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                else
-                                    MaterialTheme.colorScheme.onErrorContainer
-                            )
-
-                            // Technical diagnostics separately for administrators
-                            if (!state.technicalDetails.isNullOrBlank()) {
+                            update.sha256?.let { publishedDigest ->
                                 Spacer(modifier = Modifier.height(8.dp))
-                                AppTextButton(
-                                    text = if (showDiagnostics) "Hide Technical Diagnostics" else "View Technical Diagnostics",
-                                    onClick = { showDiagnostics = !showDiagnostics }
+                                Text(
+                                    text = "Published integrity (GitHub): $publishedDigest",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary
                                 )
-                                if (showDiagnostics) {
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                                    ) {
-                                        Text(
-                                            text = state.technicalDetails,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontFamily = FontFamily.Monospace,
-                                            modifier = Modifier.padding(8.dp),
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                }
                             }
                         }
 
@@ -467,23 +207,94 @@ fun AppUpdateDialog(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             AppOutlinedButton(
-                                text = "Dismiss",
-                                onClick = { updateManager.dismiss() },
+                                text = "Later",
+                                onClick = { updateManager.dismissUpdate(update.versionName) },
                                 modifier = Modifier.weight(1f)
                             )
-                            if (state.canRetry && state.manifest != null) {
-                                AppButton(
-                                    text = "Retry",
-                                    onClick = { updateManager.startDownload(state.manifest) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            } else if (state.canRetry) {
-                                AppButton(
-                                    text = "Retry Check",
-                                    onClick = { updateManager.checkForUpdates(isManual = true) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
+                            AppButton(
+                                text = "Download APK",
+                                onClick = { updateManager.enqueueDownload(update) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    is UpdateUiState.DownloadEnqueued -> {
+                        val update = state.update
+                        InfoCard(
+                            containerColor = LavenderSurface,
+                            borderColor = LavenderBorder
+                        ) {
+                            Text(
+                                text = "Medical Roster v${update.versionName} is downloading in the background.",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = IndigoDark
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "When the download finishes, tap the system download notification to install the update. Your local rosters, shifts, and attendance records will remain intact.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimary
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            AppOutlinedButton(
+                                text = "Releases Page",
+                                onClick = {
+                                    openBrowser(update.releasePageUrl)
+                                    updateManager.dismissDialog()
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            AppButton(
+                                text = "OK",
+                                onClick = { updateManager.dismissDialog() },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    is UpdateUiState.Error -> {
+                        InfoCard(
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                            borderColor = MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                        ) {
+                            Text(
+                                text = "Update notice",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = state.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            AppOutlinedButton(
+                                text = "Releases Page",
+                                onClick = {
+                                    openBrowser(state.releasePageUrl)
+                                    updateManager.dismissDialog()
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                            AppButton(
+                                text = "OK",
+                                onClick = { updateManager.dismissDialog() },
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                     }
 
@@ -493,27 +304,3 @@ fun AppUpdateDialog(
         }
     }
 }
-
-private fun getInstalledVersionName(context: Context): String {
-    return try {
-        val pi = context.packageManager.getPackageInfo(context.packageName, 0)
-        pi.versionName ?: "1.0.0"
-    } catch (_: Exception) {
-        "1.0.0"
-    }
-}
-
-private fun getInstalledVersionCode(context: Context): Int {
-    return try {
-        val pi = context.packageManager.getPackageInfo(context.packageName, 0)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            (pi.longVersionCode and 0xFFFFFFFFL).toInt()
-        } else {
-            @Suppress("DEPRECATION")
-            pi.versionCode
-        }
-    } catch (_: Exception) {
-        1
-    }
-}
-

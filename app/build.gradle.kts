@@ -32,8 +32,8 @@ android {
         applicationId = "com.example.rosterrebuild"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.0.0-pilot.5"
+        versionCode = 6
+        versionName = "1.0.0-pilot.6"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
@@ -113,8 +113,6 @@ dependencies {
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     ksp("androidx.room:room-compiler:$roomVersion")
-
-    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     implementation("org.opencv:opencv:4.10.0")
     implementation("com.google.mlkit:text-recognition:16.0.1")

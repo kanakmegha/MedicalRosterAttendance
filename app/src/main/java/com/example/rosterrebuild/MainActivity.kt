@@ -75,7 +75,6 @@ import com.example.rosterrebuild.ui.MyRostersScreen
 import com.example.rosterrebuild.ui.RosterDashboardScreen
 import com.example.rosterrebuild.ui.RosterReviewScreen
 import com.example.rosterrebuild.ui.SettingsDialog
-import com.example.rosterrebuild.ui.UpdateEndpointDialog
 import com.example.rosterrebuild.update.UpdateConfigStore
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -98,7 +97,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         updateManager = AppUpdateManager(this, lifecycleScope)
-        com.example.rosterrebuild.update.AppUpdateCheckWorker.schedule(applicationContext)
         val initialImagePath = intent?.getStringExtra("image_path")
         val initialEmployeeId = intent?.getStringExtra("employee_id") ?: "ABHL341"
         if (!initialImagePath.isNullOrBlank()) {
@@ -156,7 +154,6 @@ private fun RosterScreen(
 
     var showExportDialog by rememberSaveable { mutableStateOf(false) }
     var showSettingsDialog by rememberSaveable { mutableStateOf(false) }
-    var showEndpointDialog by rememberSaveable { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
@@ -888,23 +885,14 @@ private fun RosterScreen(
     if (!isEditingOrExtracting || updateState !is UpdateUiState.Available) {
         AppUpdateDialog(
             state = updateState,
-            updateManager = updateManager,
-            onLaunchIntent = { intent -> context.startActivity(intent) }
+            updateManager = updateManager
         )
     }
 
     if (showSettingsDialog) {
         SettingsDialog(
             onDismiss = { showSettingsDialog = false },
-            onCheckForUpdates = { updateManager.checkForUpdates(isManual = true) },
-            onConfigureEndpoint = { showEndpointDialog = true }
-        )
-    }
-
-    if (showEndpointDialog) {
-        UpdateEndpointDialog(
-            configStore = UpdateConfigStore(context),
-            onDismiss = { showEndpointDialog = false }
+            onCheckForUpdates = { updateManager.checkForUpdates(isManual = true) }
         )
     }
 }

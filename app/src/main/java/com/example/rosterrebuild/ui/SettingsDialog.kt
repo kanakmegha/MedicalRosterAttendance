@@ -33,8 +33,7 @@ import com.example.rosterrebuild.ui.theme.*
 @Composable
 fun SettingsDialog(
     onDismiss: () -> Unit,
-    onCheckForUpdates: () -> Unit,
-    onConfigureEndpoint: () -> Unit
+    onCheckForUpdates: () -> Unit
 ) {
     var showDiagnostics by remember { mutableStateOf(false) }
 
@@ -215,15 +214,6 @@ fun SettingsDialog(
                                         style = MaterialTheme.typography.labelSmall,
                                         fontFamily = FontFamily.Monospace,
                                         color = TextPrimary
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    AppOutlinedButton(
-                                        text = "Configure Update Endpoint",
-                                        onClick = {
-                                            onDismiss()
-                                            onConfigureEndpoint()
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
                                     )
                                 }
                             }
